@@ -24,17 +24,18 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
-# Skip the `prepare: husky` lifecycle hook in production. husky is a
-# devDependency, so `npm ci --omit=dev` doesn't install it — without
-# this flag the prepare script would crash with `husky: not found`.
-ENV HUSKY=0
 
-# Production deps only (workspaces still needed so npm resolves the tree)
+# Production deps only (workspaces still needed so npm resolves the tree).
+# Strip the husky `prepare` script before installing — husky is a
+# devDependency and `--omit=dev` skips it, so the lifecycle hook would
+# crash with `husky: not found` (exit 127).
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
 COPY frontend/package.json ./frontend/
 COPY docs/package.json ./docs/
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm pkg delete scripts.prepare && \
+    npm ci --omit=dev && \
+    npm cache clean --force
 
 # Backend source + pre-built FE/docs
 COPY backend ./backend
