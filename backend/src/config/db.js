@@ -27,8 +27,9 @@ module.exports = {
   production: {
     ...common,
     use_env_variable: "DATABASE_URL",
-    dialectOptions: {
-      ssl: { require: true, rejectUnauthorized: false },
-    },
+    dialectOptions:
+      process.env.DB_SSL === "true"
+        ? { ssl: { require: true, rejectUnauthorized: false } }
+        : {},
   },
 };
