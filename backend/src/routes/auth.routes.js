@@ -22,6 +22,19 @@ router.post("/signup", validate({ body: v.signupBody }), c.signup);
 router.post("/login", authLimiter, validate({ body: v.loginBody }), c.login);
 router.post("/logout", c.logout);
 
+router.post(
+  "/forgot-password",
+  authLimiter,
+  validate({ body: v.forgotPasswordBody }),
+  c.forgotPassword
+);
+router.post(
+  "/reset-password",
+  authLimiter,
+  validate({ body: v.resetPasswordBody }),
+  c.resetPassword
+);
+
 router.patch(
   "/profile",
   requireAdmin,

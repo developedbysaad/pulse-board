@@ -9,14 +9,26 @@ All routes are JSON. State-changing requests (`POST`, `PATCH`, `DELETE`) require
 
 ## Auth (admin)
 
-| Method | Path                      | Notes                              |
-| ------ | ------------------------- | ---------------------------------- |
-| GET    | `/api/auth/me`            | Returns `{ user: null \| { type, id, … } }` |
-| GET    | `/api/auth/csrf-token`    | Issues CSRF cookie + returns token |
-| POST   | `/api/auth/signup`        | `{ name, email, password }` — creates admin + session |
-| POST   | `/api/auth/login`         | `{ email, password }` — rate-limited (20/15min/IP)    |
-| POST   | `/api/auth/logout`        | Destroys session                   |
-| PATCH  | `/api/auth/profile`       | `{ name, email, password? }`       |
+| Method | Path                              | Notes                              |
+| ------ | --------------------------------- | ---------------------------------- |
+| GET    | `/api/auth/me`                    | Returns `{ user: null \| { type, id, … } }` |
+| GET    | `/api/auth/csrf-token`            | Issues CSRF cookie + returns token |
+| POST   | `/api/auth/signup`                | `{ name, email, password }` — creates admin + session |
+| POST   | `/api/auth/login`                 | `{ email, password }` — rate-limited (20/15min/IP)    |
+| POST   | `/api/auth/logout`                | Destroys session                   |
+| POST   | `/api/auth/forgot-password`       | `{ email }` — always returns 200; sends a reset email if the account exists. Rate-limited (20/15min/IP). |
+| POST   | `/api/auth/reset-password`        | `{ token, password }` — consumes a hex token from the reset email, sets new password. 400 if token expired / already used / invalid. |
+| PATCH  | `/api/auth/profile`               | `{ name, email, password? }`       |
+
+### Password-reset flow
+
+1. Admin posts `/forgot-password` with their email.
+2. Server looks up the `Admin`. **If found**, it invalidates any outstanding `PasswordReset` rows for that admin, generates a 64-char random hex token, stores only its SHA-256 hash with a 15-minute `expiresAt`, and fires a Brevo email (fire-and-forget) with `https://${PUBLIC_ORIGIN}/reset-password?token=<rawToken>`. **If not found**, the server takes no action.
+3. Response shape is identical either way (`{ ok: true, message: "If an account exists for that email, a reset link is on its way." }`) so the endpoint can't be used to enumerate accounts.
+4. Admin opens the link and posts `/reset-password` with `{ token, password }`.
+5. Server SHA-256s the token, looks up the matching `PasswordReset` row, verifies it isn't used or expired, bcrypt-hashes the new password onto the `Admin`, and marks the token row `usedAt = NOW()`.
+
+Raw tokens never hit disk — a DB leak can't be used to hijack a pending reset. Tokens are single-use; re-submitting a successful link returns 400. The 15-minute TTL matches the industry standard for transactional password-reset links.
 
 ## Elections (admin only)
 

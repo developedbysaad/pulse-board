@@ -9,6 +9,10 @@ module.exports = (sequelize, DataTypes) => {
         foreignKey: "adminId",
         onDelete: "CASCADE",
       });
+      Admin.hasMany(models.PasswordReset, {
+        foreignKey: "adminId",
+        onDelete: "CASCADE",
+      });
     }
 
     toJSON() {

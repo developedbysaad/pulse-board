@@ -75,31 +75,36 @@ jobs:
       name: production
 
     env:
-      # ghcr.io registry creds — auto-injected, no manual secret needed.
-      KAMAL_REGISTRY_USERNAME: ${{ github.actor }}
-      KAMAL_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      # Every value below is either a GitHub Environment secret (sensitive)
+      # or a GitHub Environment variable (non-sensitive override). Anything
+      # not set falls through to the `||` fallback. `config/deploy.yml`
+      # then reads these via ERB. No values are hardcoded.
+      KAMAL_REGISTRY_USERNAME: ${{ secrets.KAMAL_REGISTRY_USERNAME || github.actor }}
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+      KAMAL_REGISTRY_SERVER: ${{ vars.KAMAL_REGISTRY_SERVER || 'ghcr.io' }}
 
-      # Host + domain — resolved via ERB in config/deploy.yml.
+      KAMAL_SERVICE: ${{ vars.KAMAL_SERVICE || 'pulse-board' }}
       KAMAL_DEPLOY_HOST: ${{ secrets.KAMAL_DEPLOY_HOST }}
       KAMAL_SERVER_HOST: ${{ secrets.KAMAL_SERVER_HOST }}
+      GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
 
-      # Postgres — feeds the accessory's POSTGRES_PASSWORD and the
-      # DATABASE_URL composed in .kamal/secrets.
+      APP_PORT: ${{ vars.APP_PORT || '3000' }}
+      RATE_LIMIT_WINDOW_MS: ${{ vars.RATE_LIMIT_WINDOW_MS || '900000' }}
+      RATE_LIMIT_MAX: ${{ vars.RATE_LIMIT_MAX || '100' }}
+
+      POSTGRES_USER: ${{ vars.POSTGRES_USER || 'pulse' }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB || 'pulse_board_production' }}
       POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
 
-      # Core app secrets.
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
       CSRF_SECRET: ${{ secrets.CSRF_SECRET }}
       COOKIE_SECRET: ${{ secrets.COOKIE_SECRET }}
       PUBLIC_ORIGIN: https://${{ secrets.KAMAL_DEPLOY_HOST }}
 
-      # Email (Brevo) — optional; without these the app still boots,
-      # "publish results" emails just become no-ops.
       BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
       BREVO_SENDER_EMAIL: ${{ secrets.BREVO_SENDER_EMAIL }}
-      BREVO_SENDER_NAME: ${{ secrets.BREVO_SENDER_NAME }}
+      BREVO_SENDER_NAME: ${{ secrets.BREVO_SENDER_NAME || 'Pulse Board' }}
 
-      # Demo seed credentials — used by the `seed` action.
       GUEST_DEMO_EMAIL: ${{ secrets.GUEST_DEMO_EMAIL }}
       GUEST_DEMO_PASSWORD: ${{ secrets.GUEST_DEMO_PASSWORD }}
 
@@ -137,13 +142,13 @@ jobs:
         if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
         uses: docker/setup-buildx-action@v3
 
-      - name: Log into GHCR
+      - name: Log into the container registry
         if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.KAMAL_REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
 
       - name: Configure SSH agent
         uses: webfactory/ssh-agent@v0.9.1

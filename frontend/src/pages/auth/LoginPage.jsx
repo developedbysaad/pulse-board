@@ -132,6 +132,15 @@ export default function LoginPage() {
               >
                 {isSubmitting ? "Signing in…" : "Sign in →"}
               </button>
+
+              <div className="mt-4 text-right">
+                <Link
+                  to="/forgot-password"
+                  className="font-mono text-[10px] uppercase tracking-[0.22em] text-ink-muted underline-offset-4 hover:text-brand-600 hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
             </form>
 
             {signinCount > 0 ? (

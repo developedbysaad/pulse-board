@@ -11,6 +11,8 @@ import { docsHref } from "./lib/docsLink";
 import MarketingPage from "./pages/public/MarketingPage";
 import LoginPage from "./pages/auth/LoginPage";
 import SignupPage from "./pages/auth/SignupPage";
+import ForgotPasswordPage from "./pages/auth/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/auth/ResetPasswordPage";
 
 // Heavy admin + chart pages are lazy-loaded.
 const DashboardPage = lazy(() => import("./pages/admin/DashboardPage"));
@@ -44,6 +46,8 @@ export default function App() {
         <Route path="/" element={<MarketingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route
           path="/home"

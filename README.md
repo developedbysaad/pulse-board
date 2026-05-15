@@ -195,16 +195,20 @@ Without these the app still boots — they unlock outbound email and the demo-se
 | `GUEST_DEMO_EMAIL`    | Email to use for the demo admin login created by `npm run db:seed`.                                       | Demo admin seed                                                                                      |
 | `GUEST_DEMO_PASSWORD` | Password to use for that demo admin login.                                                                | Demo admin seed                                                                                      |
 
-### Auto-injected by the workflow (do **not** add as secrets)
+### Auto-injected by the workflow (you usually don't add these)
 
-The deploy workflow fills these for you — adding them yourself would just be ignored, or worse, drift from the real values.
+The deploy workflow fills these for you — for **GHCR** (the default registry) you don't need to set anything. They only become Environment secrets if you want to override the defaults (e.g. push to Docker Hub, or push to GHCR under a different account than `github.actor`).
 
-| Variable                    | Source                                                                                       |
-| --------------------------- | -------------------------------------------------------------------------------------------- |
-| `KAMAL_REGISTRY_USERNAME`   | `${{ github.actor }}` — the user who clicked **Run workflow**                                |
-| `KAMAL_REGISTRY_PASSWORD`   | The built-in `${{ secrets.GITHUB_TOKEN }}` (read/write `packages` permission already granted) |
-| `PUBLIC_ORIGIN`             | Composed as `https://${KAMAL_DEPLOY_HOST}` — used for absolute URLs in outbound email        |
-| `DATABASE_URL`              | Composed in `.kamal/secrets` from `POSTGRES_PASSWORD`, pinned to the `pulse-board-db` accessory hostname |
+| Variable                    | Default source                                                                                       | When to override                                                                                  |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `KAMAL_REGISTRY_USERNAME`   | `${{ github.actor }}` — the user who clicked **Run workflow**                                        | Push to Docker Hub or to GHCR under a different account; set the secret to your registry username |
+| `KAMAL_REGISTRY_PASSWORD`   | `${{ secrets.GITHUB_TOKEN }}` (with `packages: write` already granted on the workflow)               | Push to a registry that needs an explicit PAT; set the secret to a token with `write:packages`    |
+| `PUBLIC_ORIGIN`             | Composed as `https://${KAMAL_DEPLOY_HOST}` — used for absolute URLs in outbound email                | Almost never                                                                                       |
+| `DATABASE_URL`              | Composed in `.kamal/secrets` from `POSTGRES_PASSWORD`, pinned to the `pulse-board-db` accessory hostname | When you swap the bundled accessory for managed Postgres (Neon / Supabase / RDS / …)              |
+
+The workflow uses the GitHub Actions `||` fallback operator, so the lookup is `secrets.KAMAL_REGISTRY_USERNAME || github.actor` and `secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN`. If a secret is set, it wins; if not, the default kicks in. This is how the same workflow file works for both GHCR (zero setup) and any other registry (set both secrets).
+
+> **If your GHCR deploy fails with `unauthorized: authentication required`**, the most common cause is that `github.actor`'s `GITHUB_TOKEN` doesn't have permission to publish to the package — usually because the package already exists with restricted access or it lives under an org you're not a member of. Fix: add a `KAMAL_REGISTRY_USERNAME` secret with your real GitHub handle, and a `KAMAL_REGISTRY_PASSWORD` secret with a PAT scoped to `write:packages, read:packages`. The workflow will pick those up automatically.
 
 > **Note** — `KAMAL_SERVER_HOST` and `KAMAL_DEPLOY_HOST` are stored as **secrets** in the current workflow (the hostname/IP is not strictly sensitive, but storing them as secrets keeps them out of public run logs). If you'd rather expose them as GitHub **variables** so they show up plainly in logs, move them under **Environments → production → Add variable** and update the `secrets.*` references in both `.github/workflows/deploy.yml` and `config/deploy.yml` to `vars.*`.
 
@@ -236,6 +240,8 @@ GitHub → **Actions** → **Deploy** → **Run workflow** → pick `action` + `
 
 ```
 POST   /api/auth/signup | /login | /logout              # admin sessions
+POST   /api/auth/forgot-password                         # email a one-time reset link (rate-limited)
+POST   /api/auth/reset-password                          # consume the token, set a new password
 GET    /api/auth/me · /api/auth/csrf-token
 PATCH  /api/auth/profile
 

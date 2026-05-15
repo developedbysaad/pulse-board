@@ -24,4 +24,20 @@ const updateProfileBody = z.object({
   password: z.string().min(8).max(200).optional(),
 });
 
-module.exports = { signupBody, loginBody, voterLoginBody, updateProfileBody };
+const forgotPasswordBody = z.object({
+  email: z.string().email("Invalid email"),
+});
+
+const resetPasswordBody = z.object({
+  token: z.string().min(20, "Invalid reset token"),
+  password: z.string().min(8, "Password must be at least 8 characters").max(200),
+});
+
+module.exports = {
+  signupBody,
+  loginBody,
+  voterLoginBody,
+  updateProfileBody,
+  forgotPasswordBody,
+  resetPasswordBody,
+};
