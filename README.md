@@ -134,8 +134,15 @@ Dockerfile               # multi-stage: install → build FE+docs → slim runti
 config/deploy.yml        # Kamal config (ERB-templated from env vars)
 .kamal/secrets           # gitignored; references SESSION_SECRET / POSTGRES_PASSWORD / etc.
 .kamal/hooks/pre-deploy  # runs `npx sequelize-cli db:migrate` on each deploy
-.github/workflows/deploy.yml   # manual dispatch
+.github/workflows/deploy.yml   # manual dispatch only — see workflow inputs below
 ```
+
+The deploy workflow is **manual-dispatch only** (`on: workflow_dispatch`). There is no auto-deploy on push. Two inputs at run time:
+
+- **`ref`** — branch, tag, or commit SHA to deploy. Defaults to `main`.
+- **`action`** — `deploy` (default), `redeploy`, `rollback`, or `proxy-reboot`.
+
+For the full step-by-step "from a blank GitHub repo to a live URL" runbook, see [`plan/setup.md`](plan/setup.md) — including the [TL;DR go-live checklist](plan/setup.md#tldr--go-live-checklist) at the top. The tables below are the secret reference the runbook points at.
 
 ### Required GitHub Environment secrets
 
@@ -182,7 +189,22 @@ The deploy workflow fills these for you — adding them yourself would just be i
 
 > **Note** — `KAMAL_SERVER_HOST` and `KAMAL_DEPLOY_HOST` are stored as **secrets** in the current workflow (the hostname/IP is not strictly sensitive, but storing them as secrets keeps them out of public run logs). If you'd rather expose them as GitHub **variables** so they show up plainly in logs, move them under **Environments → production → Add variable** and update the `secrets.*` references in both `.github/workflows/deploy.yml` and `config/deploy.yml` to `vars.*`.
 
-To deploy: GitHub → Actions → **Deploy** → Run workflow. First time only, run `kamal setup` once from your laptop to boot the Postgres accessory; after that the Action handles everything. See [the deploying guide](https://pulse-board.developedbysaad.com/docs/deploying/) for the one-time setup.
+### What the workflow actually does
+
+Every `Run workflow` click goes through these steps:
+
+1. **Validate required secrets** — fails fast with a named-missing list if any of the seven required Environment secrets aren't set.
+2. Checkout the chosen `ref`.
+3. Install Ruby 3.3 + Kamal 2.11.0 + Docker Buildx.
+4. Log into GHCR with the auto-injected `GITHUB_TOKEN`.
+5. Load `SSH_PRIVATE_KEY` into ssh-agent and `ssh-keyscan` the deploy host.
+6. Release any stale Kamal lock, then run `kamal <action>`.
+7. After a successful `deploy`, prune old containers + images on the host so disk doesn't grow forever.
+8. Write a step summary with `action / ref / commit / status / URL / docs URL`.
+
+### To deploy
+
+GitHub → **Actions** → **Deploy** → **Run workflow** → pick `ref` and `action` → Run. First time only, run `kamal setup` once from your laptop to boot the Postgres accessory and provision TLS — see [`plan/setup.md` §2.8](plan/setup.md#28-first-deploy-one-time-kamal-setup-from-your-laptop). After that, the Action handles everything.
 
 ## API surface (admin)
 

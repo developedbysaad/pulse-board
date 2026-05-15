@@ -1,20 +1,39 @@
 name: Deploy
 
+# Manual-dispatch only — every production release is intentional and
+# tied to whatever ref the user picks. There is no auto-deploy on push.
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit SHA to deploy'
+        required: false
+        default: 'main'
+        type: string
+      action:
+        description: 'Kamal action to run'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - redeploy
+          - rollback
+          - proxy-reboot
 
 permissions:
   contents: read
   packages: write
 
 concurrency:
-  group: deploy
+  group: deploy-production
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy to Hetzner
+    name: "${{ github.event.inputs.action }} → production"
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     # Use a GitHub Environment so secrets can be gated behind a
     # required-reviewer rule (Settings → Environments → production).
@@ -52,8 +71,26 @@ jobs:
       GUEST_DEMO_PASSWORD: ${{ secrets.GUEST_DEMO_PASSWORD }}
 
     steps:
+      - name: Validate required secrets
+        run: |
+          missing=""
+          [ -z "${{ secrets.SSH_PRIVATE_KEY }}"     ] && missing="$missing SSH_PRIVATE_KEY"
+          [ -z "${{ secrets.KAMAL_SERVER_HOST }}"   ] && missing="$missing KAMAL_SERVER_HOST"
+          [ -z "${{ secrets.KAMAL_DEPLOY_HOST }}"   ] && missing="$missing KAMAL_DEPLOY_HOST"
+          [ -z "${{ secrets.POSTGRES_PASSWORD }}"   ] && missing="$missing POSTGRES_PASSWORD"
+          [ -z "${{ secrets.SESSION_SECRET }}"      ] && missing="$missing SESSION_SECRET"
+          [ -z "${{ secrets.CSRF_SECRET }}"         ] && missing="$missing CSRF_SECRET"
+          [ -z "${{ secrets.COOKIE_SECRET }}"       ] && missing="$missing COOKIE_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required Environment secrets:$missing"
+            echo "Add them under Settings → Environments → production. See README → Deploy."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Set up Ruby (Kamal is a Ruby gem)
         uses: ruby/setup-ruby@v1
@@ -83,15 +120,39 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.KAMAL_SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Deploy with Kamal
-        run: kamal deploy
+      - name: "Run kamal ${{ github.event.inputs.action }}"
         env:
           VERSION: ${{ github.sha }}
+        run: |
+          # Release any stale Kamal lock from a previously-cancelled run so we
+          # never block on a phantom lockfile. Failing to release is harmless.
+          kamal lock release 2>/dev/null || true
+
+          case "${{ github.event.inputs.action }}" in
+            deploy)        kamal deploy ;;
+            redeploy)      kamal redeploy ;;
+            rollback)      kamal rollback ;;
+            proxy-reboot)  kamal proxy reboot --confirmed ;;
+          esac
+
+      - name: Prune old containers and images
+        if: success() && github.event.inputs.action == 'deploy'
+        run: kamal prune all || true
+        continue-on-error: true
 
       - name: Summary
-        if: success()
+        if: always()
         run: |
-          echo "### Deployed :rocket:" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- URL: https://${{ secrets.KAMAL_DEPLOY_HOST }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Docs: https://${{ secrets.KAMAL_DEPLOY_HOST }}/docs/" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Deploy summary"
+            echo ""
+            echo "| Detail | Value |"
+            echo "|--------|-------|"
+            echo "| **Action** | \`${{ github.event.inputs.action }}\` |"
+            echo "| **Ref** | \`${{ github.event.inputs.ref }}\` |"
+            echo "| **Commit** | \`${{ github.sha }}\` |"
+            echo "| **Actor** | @${{ github.actor }} |"
+            echo "| **Status** | \`${{ job.status }}\` |"
+            echo "| **URL** | https://${{ secrets.KAMAL_DEPLOY_HOST }} |"
+            echo "| **Docs** | https://${{ secrets.KAMAL_DEPLOY_HOST }}/docs/ |"
+          } >> "$GITHUB_STEP_SUMMARY"

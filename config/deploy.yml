@@ -1,4 +1,4 @@
-# Pulse Board — Kamal 2 deploy config (Hetzner).
+# Pulse Board — Kamal 2 deploy config.
 #
 # Single-target deployment. Designed to coexist with other Kamal apps on
 # the same host:
