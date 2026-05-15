@@ -1,8 +1,23 @@
-<% begin; require "dotenv"; Dotenv.load(".env"); rescue LoadError; end %>
+<%
+  begin
+    require "dotenv"
+    Dotenv.load(".env")
+  rescue LoadError
+  end
 
-service: <%= ENV.fetch('KAMAL_SERVICE', 'pulse-board') %>
+  # Treat empty-string env vars as missing. The GitHub Actions workflow
+  # exports a `${{ vars.X }}` expression as "" when the variable is unset,
+  # which would otherwise defeat ENV.fetch's default. Use env_or everywhere
+  # a default matters.
+  def env_or(key, fallback = nil)
+    v = ENV[key]
+    v && !v.empty? ? v : fallback
+  end
+%>
 
-image: <%= ENV.fetch('KAMAL_IMAGE', "#{ENV.fetch('KAMAL_REGISTRY_USERNAME', 'developedbysaad')}/#{ENV.fetch('KAMAL_SERVICE', 'pulse-board')}") %>
+service: <%= env_or('KAMAL_SERVICE', 'pulse-board') %>
+
+image: <%= env_or('KAMAL_IMAGE') || "#{env_or('KAMAL_REGISTRY_USERNAME', 'developedbysaad')}/#{env_or('KAMAL_SERVICE', 'pulse-board')}" %>
 
 servers:
   web:
@@ -12,7 +27,7 @@ servers:
 
 proxy:
   ssl: true
-  app_port: <%= ENV.fetch('APP_PORT', 3000) %>
+  app_port: <%= env_or('APP_PORT', 3000) %>
   host: <%= ENV['KAMAL_DEPLOY_HOST'] %>
   healthcheck:
     path: /api/health
@@ -20,7 +35,7 @@ proxy:
     timeout: 3
 
 registry:
-  server: <%= ENV.fetch('KAMAL_REGISTRY_SERVER', 'index.docker.io') %>
+  server: <%= env_or('KAMAL_REGISTRY_SERVER', 'index.docker.io') %>
   username:
     - KAMAL_REGISTRY_USERNAME
   password:
@@ -30,14 +45,14 @@ builder:
   arch: amd64
   cache:
     type: registry
-    image: <%= ENV.fetch('KAMAL_BUILD_CACHE_IMAGE', "#{ENV.fetch('KAMAL_REGISTRY_USERNAME', 'developedbysaad')}/#{ENV.fetch('KAMAL_SERVICE', 'pulse-board')}-buildcache") %>
+    image: <%= env_or('KAMAL_BUILD_CACHE_IMAGE') || "#{env_or('KAMAL_REGISTRY_USERNAME', 'developedbysaad')}/#{env_or('KAMAL_SERVICE', 'pulse-board')}-buildcache" %>
 
 env:
   clear:
     NODE_ENV: production
-    PORT: <%= ENV.fetch('APP_PORT', 3000) %>
-    RATE_LIMIT_WINDOW_MS: <%= ENV.fetch('RATE_LIMIT_WINDOW_MS', 900000) %>
-    RATE_LIMIT_MAX: <%= ENV.fetch('RATE_LIMIT_MAX', 100) %>
+    PORT: <%= env_or('APP_PORT', 3000) %>
+    RATE_LIMIT_WINDOW_MS: <%= env_or('RATE_LIMIT_WINDOW_MS', 900000) %>
+    RATE_LIMIT_MAX: <%= env_or('RATE_LIMIT_MAX', 100) %>
   secret:
     - SESSION_SECRET
     - CSRF_SECRET
@@ -56,8 +71,8 @@ accessories:
     host: <%= ENV['KAMAL_SERVER_HOST'] %>
     env:
       clear:
-        POSTGRES_USER: <%= ENV.fetch('POSTGRES_USER', 'pulse') %>
-        POSTGRES_DB: <%= ENV.fetch('POSTGRES_DB', 'pulse_board_production') %>
+        POSTGRES_USER: <%= env_or('POSTGRES_USER', 'pulse') %>
+        POSTGRES_DB: <%= env_or('POSTGRES_DB', 'pulse_board_production') %>
       secret:
         - POSTGRES_PASSWORD
     directories:
