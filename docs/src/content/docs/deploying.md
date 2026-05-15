@@ -86,15 +86,15 @@ The job:
 
 1. Checks out the repo.
 2. Sets up Ruby + installs Kamal 2.
-3. Logs into GHCR with `GITHUB_TOKEN`.
+3. Logs into Docker Hub with `KAMAL_REGISTRY_USERNAME` + `KAMAL_REGISTRY_PASSWORD` (a PAT).
 4. Loads `SSH_PRIVATE_KEY` into ssh-agent.
 5. Runs `kamal deploy`.
 
 Kamal then:
 
 1. Builds the multi-stage Docker image (frontend + docs + backend prod deps).
-2. Pushes to `ghcr.io/<owner>/pulse-board`.
-3. SSHes to the Hetzner VPS.
+2. Pushes to `docker.io/<KAMAL_REGISTRY_USERNAME>/pulse-board`.
+3. SSHes to the deploy server.
 4. Pulls the image, runs the pre-deploy migration hook, starts the new container, and the shared proxy swaps traffic to it.
 
 ## Files involved

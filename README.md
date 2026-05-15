@@ -138,7 +138,9 @@ NODE_ENV=production node backend/src/index.js
 
 ## Deploy (Kamal 2 + GitHub Actions)
 
-Pulse Board ships as one Docker image. Kamal 2 builds it, pushes to GHCR, boots a bundled Postgres accessory the first time, runs migrations, and atomic-swaps the new container behind a shared `kamal-proxy` with Let's Encrypt TLS — all of it driven by `kamal` CLI commands wrapped by a manual-dispatch GitHub workflow.
+Pulse Board ships as one Docker image. Kamal 2 builds it, pushes to **Docker Hub**, boots a bundled Postgres accessory the first time, runs migrations, and atomic-swaps the new container behind a shared `kamal-proxy` with Let's Encrypt TLS — all of it driven by `kamal` CLI commands wrapped by a manual-dispatch GitHub workflow.
+
+> **New to Docker Hub?** Walk through [`plan/docker-hub.md`](plan/docker-hub.md) first — it covers PAT generation, the auth model, the UI, and the typical first-deploy flow.
 
 ```
 Dockerfile               # multi-stage: install → build FE+docs → slim runtime
@@ -162,7 +164,7 @@ Each action is a thin wrapper around the named Kamal command. The dropdown is gr
 
 | `action` value   | Wraps                                                  | What it does                                                                                              | When to use                                                              |
 | ---------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `deploy`         | `kamal deploy`                                         | Build the image → push to GHCR → run pre-deploy migrations → atomic blue-green swap on the host           | The default. Every normal release.                                       |
+| `deploy`         | `kamal deploy`                                         | Build the image → push to Docker Hub → run pre-deploy migrations → atomic blue-green swap on the host     | The default. Every normal release.                                       |
 | `redeploy`       | `kamal redeploy`                                       | Restart the existing container with the **same** image (no rebuild, no push). Drops in-memory state.      | Picked up new env-var values; need a fresh process without a code change. |
 | `rollback`       | `kamal rollback`                                       | Flip the live container back to the previous image version Kamal still has on disk                        | Latest release is broken and you want it gone now.                       |
 | `setup`          | `kamal setup`                                          | FIRST-TIME provision — install Docker, boot the Postgres accessory, run migrations, deploy                | Only on a brand-new host. Usually run from your laptop once.             |
@@ -187,67 +189,73 @@ Tip — generate any of the three app secrets below with:
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-| Secret name           | What to paste in                                                                                          | Used for                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `SSH_PRIVATE_KEY`     | Full PEM private key (incl. `-----BEGIN ... PRIVATE KEY-----` lines) whose public half is in the VPS's `~/.ssh/authorized_keys`. | Loaded into the GitHub runner's ssh-agent so Kamal can SSH into the VPS                              |
-| `KAMAL_SERVER_HOST`   | VPS IP or hostname Kamal SSHes into — e.g. `123.45.67.89` or `vps.example.com`.                           | Resolved into `servers.web.hosts` and the Postgres accessory's `host` in `config/deploy.yml`         |
-| `KAMAL_DEPLOY_HOST`   | Public domain users hit — e.g. `pulse-board.example.com`. DNS A record must already point at `KAMAL_SERVER_HOST`. | `proxy.host`; Kamal's built-in proxy provisions Let's Encrypt TLS for this domain                    |
-| `POSTGRES_PASSWORD`   | A strong random password (≥ 24 chars). Used by both the Postgres accessory and the app's `DATABASE_URL`.  | `POSTGRES_PASSWORD` on the accessory; composed into `DATABASE_URL` for the app                       |
-| `SESSION_SECRET`      | 64-char hex string from the `node` snippet above. ≥ 16 chars required by env validation.                  | Signing key for express-session cookies                                                              |
-| `CSRF_SECRET`         | 64-char hex string from the `node` snippet above. ≥ 16 chars required.                                    | HMAC key for the [`csrf-csrf`](https://www.npmjs.com/package/csrf-csrf) npm package's double-submit-cookie CSRF tokens |
-| `COOKIE_SECRET`       | 64-char hex string from the `node` snippet above. ≥ 16 chars required.                                    | `cookie-parser` signing + the HMAC key for `Response.ipHash` (rotating it invalidates all stored hashes) |
+| Secret name              | Example shape                                                                | What to paste in                                                                                          |
+| ------------------------ | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `SSH_PRIVATE_KEY`        | `-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----` | Full PEM private key (incl. the `-----BEGIN`/`-----END` lines) whose public half is in the server's `~/.ssh/authorized_keys`. |
+| `KAMAL_SERVER_HOST`      | `203.0.113.42` *or* `vps.example.com`                                        | VPS IPv4/IPv6/DNS name Kamal SSHes into.                                                                  |
+| `KAMAL_DEPLOY_HOST`      | `pulse-board.example.com`                                                    | Public domain visitors hit. DNS A record must already point at `KAMAL_SERVER_HOST`.                       |
+| `KAMAL_REGISTRY_USERNAME` | `your-dockerhub-handle`                                                     | Your Docker Hub handle — the namespace the image will live under.                                         |
+| `KAMAL_REGISTRY_PASSWORD` | `dckr_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxx`                                     | A Docker Hub PAT from <https://app.docker.com/settings/personal-access-tokens>, scope `Read & Write`. **Not** your account password. |
+| `POSTGRES_PASSWORD`      | `replace-me-with-a-strong-random-password`                                   | Strong random password (≥ 24 chars). `openssl rand -base64 32` works.                                     |
+| `SESSION_SECRET`         | `0000…0000` (64-char hex)                                                    | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. ≥ 16 chars required.          |
+| `CSRF_SECRET`            | `1111…1111` (64-char hex)                                                    | Same generator, different value. HMAC key for [`csrf-csrf`](https://www.npmjs.com/package/csrf-csrf).     |
+| `COOKIE_SECRET`          | `2222…2222` (64-char hex)                                                    | Same generator, different value. `cookie-parser` signing + HMAC key for `Response.ipHash`.                |
 
 ### Optional secrets
 
 Without these the app still boots — they unlock outbound email and the demo-seed flow. Add them in the same way (`Settings → Environments → production → Add secret`).
 
-| Secret name           | What to paste in                                                                                          | Used for                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `BREVO_API_KEY`       | A v3 API key from Brevo → **Settings → SMTP & API → API Keys**.                                            | Transactional email sender. Unset → "publish results" emails become no-ops (logged, not delivered)   |
-| `BREVO_SENDER_EMAIL`  | The verified sender address on the Brevo side (e.g. `hello@yourdomain.com`).                              | `From:` address on outbound email                                                                    |
-| `BREVO_SENDER_NAME`   | Display name shown in inboxes (e.g. `Pulse Board`). Defaults to `Pulse Board` if unset.                   | Friendly `From:` label                                                                               |
-| `GUEST_DEMO_EMAIL`    | Email to use for the demo admin login created by `npm run db:seed`.                                       | Demo admin seed                                                                                      |
-| `GUEST_DEMO_PASSWORD` | Password to use for that demo admin login.                                                                | Demo admin seed                                                                                      |
+| Secret name           | Example shape                                                       | What to paste in                                                                                          |
+| --------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `BREVO_API_KEY`       | `xkeysib-xxxxxxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx`             | v3 API key from <https://app.brevo.com/settings/keys/api>. Unset → results / password-reset emails fall back to `console.log`. |
+| `BREVO_SENDER_EMAIL`  | `hello@example.com`                                                 | A sender address verified on Brevo. Becomes the `From:` address.                                          |
+| `BREVO_SENDER_NAME`   | `Pulse Board`                                                       | `From:` display name. Defaults to `Pulse Board`.                                                          |
+| `GUEST_DEMO_EMAIL`    | `demo@example.com`                                                  | Email for the demo admin login `npm run db:seed` creates.                                                 |
+| `GUEST_DEMO_PASSWORD` | `replace-me-with-a-demo-password`                                   | Password for that demo admin login.                                                                       |
 
 ### Optional GitHub Environment **variables** (non-sensitive overrides)
 
 These are *variables* not *secrets* — values you might tweak per-fork but don't need to hide. Add them under **Settings → Environments → `production` → Add variable**. Every row has a workflow-side default, so leave them unset to use Pulse Board's defaults. The workflow reads each as `${{ vars.<NAME> || '<default>' }}`.
 
-| Variable                  | Default               | When to set                                                                              |
-| ------------------------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| `KAMAL_SERVICE`           | `pulse-board`         | Forking the repo into another app on the same host — namespaces every container/volume. |
-| `KAMAL_REGISTRY_SERVER`   | `ghcr.io`             | Pushing to Docker Hub (`index.docker.io`) or a private registry.                          |
-| `APP_PORT`                | `3000`                | Running multiple services on the same host that all want :3000 internally.                |
-| `RATE_LIMIT_WINDOW_MS`    | `900000` (15 min)     | Tightening / loosening the public submit-response rate limit.                             |
-| `RATE_LIMIT_MAX`          | `100`                 | Same — max requests per window per IP.                                                    |
-| `POSTGRES_USER`           | `pulse`               | Forking — match the new app's name for clarity in `psql`.                                |
-| `POSTGRES_DB`             | `pulse_board_production` | Forking — same.                                                                       |
+| Variable                  | Default                  | Example value to put in vars  | When to set                                                                              |
+| ------------------------- | ------------------------ | ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `KAMAL_SERVICE`           | `pulse-board`            | `voter-pulse`                 | Forking the repo into another app on the same host — namespaces every container/volume. |
+| `KAMAL_REGISTRY_SERVER`   | `index.docker.io`        | `ghcr.io`                     | Pushing to a registry other than Docker Hub.                                              |
+| `KAMAL_IMAGE`             | `<USER>/<SERVICE>`       | `acme-org/pulse-board`        | The image path differs from `<KAMAL_REGISTRY_USERNAME>/<KAMAL_SERVICE>` (e.g. org-owned). |
+| `APP_PORT`                | `3000`                   | `4000`                        | Multiple services on the host that all want :3000 internally.                            |
+| `RATE_LIMIT_WINDOW_MS`    | `900000` (15 min)        | `60000`                       | Tighten / loosen the public submit-response rate limit window.                            |
+| `RATE_LIMIT_MAX`          | `100`                    | `30`                          | Max requests per window per IP.                                                           |
+| `POSTGRES_USER`           | `pulse`                  | `voter`                       | Forking — match the new app's name for clarity in `psql`.                                |
+| `POSTGRES_DB`             | `pulse_board_production` | `voter_pulse_production`      | Forking — same.                                                                          |
 
-### Registry credentials — defaults, overrides, and the GHCR gotcha
+### Registry credentials
 
-The workflow needs to log in to a container registry to push the built image. It does this via three keys, all overridable:
+Docker Hub requires **explicit** credentials — there's no auto-injected token like GHCR's `GITHUB_TOKEN`. The two values above (`KAMAL_REGISTRY_USERNAME`, `KAMAL_REGISTRY_PASSWORD`) are read directly with no fallback:
 
 ```yaml
-KAMAL_REGISTRY_SERVER:   ${{ vars.KAMAL_REGISTRY_SERVER   || 'ghcr.io' }}
-KAMAL_REGISTRY_USERNAME: ${{ secrets.KAMAL_REGISTRY_USERNAME || github.actor }}
-KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+KAMAL_REGISTRY_SERVER:   ${{ vars.KAMAL_REGISTRY_SERVER   || 'index.docker.io' }}
+KAMAL_REGISTRY_USERNAME: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
+KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 ```
 
-The `||` operator means: if you've set a secret/variable, it wins; if not, the default kicks in. This is how the same workflow handles both registries:
+The validate-secrets step at the top of the `kamal` job fails fast if either is missing.
 
-- **GHCR (default)** — leave all three unset. The workflow uses `github.actor` as username and the auto-issued `${{ secrets.GITHUB_TOKEN }}` as password. The `permissions: packages: write` at the top of the workflow grants the token publish access. Zero secrets needed in 90% of cases.
-- **Docker Hub or any other registry** — add `KAMAL_REGISTRY_USERNAME` and `KAMAL_REGISTRY_PASSWORD` as Environment **secrets** (the password is a PAT). Optionally set `KAMAL_REGISTRY_SERVER` as a variable (`index.docker.io` for Docker Hub).
+To use a Docker Hub PAT:
 
-> **GHCR `unauthorized: authentication required` after running `setup`?**
-> The auto-injected `GITHUB_TOKEN` doesn't have permission to publish to the package. Usually one of:
-> - The package was previously created with restricted access — fix by visiting `https://github.com/users/<owner>/packages/container/<service>/settings` and granting your repo write access, **or**
-> - The package lives under an org the actor isn't a member of — fix by adding `KAMAL_REGISTRY_USERNAME` (your GitHub handle) and `KAMAL_REGISTRY_PASSWORD` (a PAT with `write:packages, read:packages`) as Environment secrets. The workflow picks them up automatically via the `||` fallback.
+1. <https://app.docker.com/settings/personal-access-tokens> → **Generate new token** → `Read & Write` scope.
+2. Copy the token (Docker Hub shows it once).
+3. Set both Environment secrets:
+   - `KAMAL_REGISTRY_USERNAME` = your Docker Hub handle
+   - `KAMAL_REGISTRY_PASSWORD` = the PAT
+
+For full Docker Hub coverage — image visibility, rate limits, the "auto-create on first push" behaviour, common errors — see [`plan/docker-hub.md`](plan/docker-hub.md).
+
+> **Switching to GHCR or another registry?** Set `KAMAL_REGISTRY_SERVER` (variable) to the new endpoint (`ghcr.io`, your ECR host, etc.) and update `KAMAL_REGISTRY_USERNAME` / `KAMAL_REGISTRY_PASSWORD` to credentials for that registry. Optionally set `KAMAL_IMAGE` to the full image path if it doesn't match `<username>/<service>`.
 
 ### Other auto-injected values (do not add as secrets)
 
 | Variable                | Source                                                                                                              |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `GITHUB_REPOSITORY_OWNER` | `${{ github.repository_owner }}` — feeds the image path `<owner>/<service>`                                       |
 | `PUBLIC_ORIGIN`         | Composed as `https://${KAMAL_DEPLOY_HOST}` — used for absolute URLs in outbound email / password-reset links       |
 | `DATABASE_URL`          | Composed in `.kamal/secrets` as `postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${KAMAL_SERVICE}-db:5432/${POSTGRES_DB}` |
 
@@ -276,11 +284,11 @@ After that, deploy from the laptop with `kamal deploy`, or hand off to the GitHu
 
 For `deploy` / `redeploy` / `rollback` / `setup` / `migrate` / `seed` / `proxy-reboot` / `prune`, the `kamal` job runs:
 
-1. **Validate required Environment secrets** — fails fast with a named-missing list if any of the seven required secrets aren't set.
+1. **Validate required Environment secrets** — fails fast with a named-missing list if any of the nine required secrets aren't set (including `KAMAL_REGISTRY_USERNAME` / `_PASSWORD`).
 2. Checkout the chosen `ref`.
 3. Install Ruby 3.3 + Kamal 2.11.0.
-4. Set up Docker Buildx + log into GHCR (only for `deploy` / `setup` — the others don't build).
-5. Load `SSH_PRIVATE_KEY` into ssh-agent and `ssh-keyscan` the deploy host.
+4. Set up Docker Buildx + log into Docker Hub (only for `deploy` / `setup` — the others don't build).
+5. Load `SSH_PRIVATE_KEY` into ssh-agent and configure SSH to skip strict host-key checking (avoids `Net::SSH::HostKeyMismatch` when the server advertises multiple host-key algorithms).
 6. Release any stale `kamal lock`, then run the wrapped Kamal command.
 7. After a successful `deploy`, run `kamal prune all` so old containers + images don't pile up on the host.
 8. Write a step summary with `action / ref / commit / status / URL / docs URL`.

@@ -4,12 +4,11 @@ name: Deploy
 # Manual-dispatch only.
 #   • The only trigger is `workflow_dispatch:` below — a job *only*
 #     runs when someone clicks Actions → Deploy → Run workflow.
-#   • There is no `on: push`, `on: pull_request`, `on: schedule`,
-#     etc. Pushing to main does NOT deploy.
-#   • If GitHub shows "Invalid workflow file" with no run history,
-#     the file failed YAML/context validation at parse time —
-#     that is *not* the workflow running. Fix the error and the
-#     workflow stays dormant until a manual run.
+#   • There is no `on: push`, `on: pull_request`, `on: schedule`.
+#   • Pushes the image to Docker Hub (default — override via
+#     `KAMAL_REGISTRY_SERVER` variable). Auth is via
+#     `KAMAL_REGISTRY_USERNAME` + `KAMAL_REGISTRY_PASSWORD` Environment
+#     secrets, which are REQUIRED for every deploy/setup.
 #
 # Every action below is a thin wrapper around a Kamal CLI command,
 # so anyone reading the dropdown can map the option to docs at
@@ -24,20 +23,16 @@ on:
         default: 'deploy'
         type: choice
         options:
-          # Lifecycle — actions that move the running app.
-          - deploy           # build → push → migrate → atomic blue-green swap (the typical action)
-          - redeploy         # restart the existing container with the SAME image (no rebuild, no push)
-          - rollback         # roll the live container back to the previous image version
-          - setup            # FIRST-TIME provision: install Docker, boot Postgres accessory, run migrations, deploy. Usually run from your laptop once — included here as a safety net.
-          # Database — one-off commands inside the existing container.
-          - migrate          # re-run `npx sequelize-cli db:migrate` (the pre-deploy hook already runs this on every deploy)
-          - seed             # run `npx sequelize-cli db:seed:all` to load demo data
-          # Observability — fetch logs without leaving the GitHub UI.
-          - logs             # last 500 lines from the pulse-board-web container
-          - logs-errors      # error/exception/5xx lines from the last 24h
-          # Maintenance — rarely-used housekeeping.
-          - proxy-reboot     # restart the host's kamal-proxy singleton (only if proxy config changed)
-          - prune            # clean up old containers + dangling images on the host
+          - deploy
+          - redeploy
+          - rollback
+          - setup
+          - migrate
+          - seed
+          - logs
+          - logs-errors
+          - proxy-reboot
+          - prune
       ref:
         description: 'Branch, tag, or commit SHA to deploy (defaults to main)'
         required: false
@@ -46,47 +41,30 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
 jobs:
-  # ───────────────────────────────────────────────────────────────────
-  # Heavy actions — need the full Kamal toolchain (Ruby + Docker + SSH).
-  # ───────────────────────────────────────────────────────────────────
   kamal:
     name: "kamal ${{ github.event.inputs.action }} → production"
     if: contains(fromJSON('["deploy","redeploy","rollback","setup","migrate","seed","proxy-reboot","prune"]'), github.event.inputs.action)
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    # Use a GitHub Environment so secrets can be gated behind a
-    # required-reviewer rule (Settings → Environments → production).
-    #
-    # NOTE: GitHub does NOT allow the `secrets` context inside
-    # `environment.url` — only `env` / `vars` / `github`. Since
-    # `KAMAL_DEPLOY_HOST` is stored as a secret, we omit `url:`
-    # here and emit the live URL in the step summary instead.
-    # If you move `KAMAL_DEPLOY_HOST` to `vars.*`, you can add:
-    #   url: https://${{ vars.KAMAL_DEPLOY_HOST }}
     environment:
       name: production
 
     env:
-      # Every value below is either a GitHub Environment secret (sensitive)
-      # or a GitHub Environment variable (non-sensitive override). Anything
-      # not set falls through to the `||` fallback. `config/deploy.yml`
-      # then reads these via ERB. No values are hardcoded.
-      KAMAL_REGISTRY_USERNAME: ${{ secrets.KAMAL_REGISTRY_USERNAME || github.actor }}
-      KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
-      KAMAL_REGISTRY_SERVER: ${{ vars.KAMAL_REGISTRY_SERVER || 'ghcr.io' }}
+      KAMAL_REGISTRY_SERVER: ${{ vars.KAMAL_REGISTRY_SERVER || 'index.docker.io' }}
+      KAMAL_REGISTRY_USERNAME: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 
       KAMAL_SERVICE: ${{ vars.KAMAL_SERVICE || 'pulse-board' }}
+      KAMAL_IMAGE: ${{ vars.KAMAL_IMAGE }}
       KAMAL_DEPLOY_HOST: ${{ secrets.KAMAL_DEPLOY_HOST }}
       KAMAL_SERVER_HOST: ${{ secrets.KAMAL_SERVER_HOST }}
-      GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
 
       APP_PORT: ${{ vars.APP_PORT || '3000' }}
       RATE_LIMIT_WINDOW_MS: ${{ vars.RATE_LIMIT_WINDOW_MS || '900000' }}
@@ -112,13 +90,15 @@ jobs:
       - name: Validate required Environment secrets
         run: |
           missing=""
-          [ -z "${{ secrets.SSH_PRIVATE_KEY }}"   ] && missing="$missing SSH_PRIVATE_KEY"
-          [ -z "${{ secrets.KAMAL_SERVER_HOST }}" ] && missing="$missing KAMAL_SERVER_HOST"
-          [ -z "${{ secrets.KAMAL_DEPLOY_HOST }}" ] && missing="$missing KAMAL_DEPLOY_HOST"
-          [ -z "${{ secrets.POSTGRES_PASSWORD }}" ] && missing="$missing POSTGRES_PASSWORD"
-          [ -z "${{ secrets.SESSION_SECRET }}"    ] && missing="$missing SESSION_SECRET"
-          [ -z "${{ secrets.CSRF_SECRET }}"       ] && missing="$missing CSRF_SECRET"
-          [ -z "${{ secrets.COOKIE_SECRET }}"     ] && missing="$missing COOKIE_SECRET"
+          [ -z "${{ secrets.SSH_PRIVATE_KEY }}"        ] && missing="$missing SSH_PRIVATE_KEY"
+          [ -z "${{ secrets.KAMAL_SERVER_HOST }}"      ] && missing="$missing KAMAL_SERVER_HOST"
+          [ -z "${{ secrets.KAMAL_DEPLOY_HOST }}"      ] && missing="$missing KAMAL_DEPLOY_HOST"
+          [ -z "${{ secrets.KAMAL_REGISTRY_USERNAME }}" ] && missing="$missing KAMAL_REGISTRY_USERNAME"
+          [ -z "${{ secrets.KAMAL_REGISTRY_PASSWORD }}" ] && missing="$missing KAMAL_REGISTRY_PASSWORD"
+          [ -z "${{ secrets.POSTGRES_PASSWORD }}"      ] && missing="$missing POSTGRES_PASSWORD"
+          [ -z "${{ secrets.SESSION_SECRET }}"         ] && missing="$missing SESSION_SECRET"
+          [ -z "${{ secrets.CSRF_SECRET }}"            ] && missing="$missing CSRF_SECRET"
+          [ -z "${{ secrets.COOKIE_SECRET }}"          ] && missing="$missing COOKIE_SECRET"
           if [ -n "$missing" ]; then
             echo "::error::Missing required Environment secrets:$missing"
             echo "Add them under Settings → Environments → production. See README → Deploy."
@@ -142,13 +122,13 @@ jobs:
         if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
         uses: docker/setup-buildx-action@v3
 
-      - name: Log into the container registry
+      - name: Log into Docker Hub
         if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ secrets.KAMAL_REGISTRY_USERNAME || github.actor }}
-          password: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+          registry: ${{ env.KAMAL_REGISTRY_SERVER }}
+          username: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
+          password: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 
       - name: Configure SSH agent
         uses: webfactory/ssh-agent@v0.9.1
@@ -158,13 +138,13 @@ jobs:
       - name: Trust the deploy host
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.KAMAL_SERVER_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.KAMAL_SERVER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+          echo -e "Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null" >> ~/.ssh/config
 
       - name: "Run: kamal ${{ github.event.inputs.action }}"
         env:
           VERSION: ${{ github.sha }}
         run: |
-          # Release any stale Kamal lock from a previously-cancelled run.
           kamal lock release 2>/dev/null || true
 
           case "${{ github.event.inputs.action }}" in
@@ -204,11 +184,6 @@ jobs:
             echo "| **Docs** | https://${{ secrets.KAMAL_DEPLOY_HOST }}/docs/ |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ───────────────────────────────────────────────────────────────────
-  # Light actions — log fetch over SSH. No Ruby, no Docker, no Kamal.
-  # Patterns after Kamal's `kamal app logs`, but one-shot so the job
-  # finishes instead of streaming forever.
-  # ───────────────────────────────────────────────────────────────────
   logs:
     name: "kamal ${{ github.event.inputs.action }} → production"
     if: contains(fromJSON('["logs","logs-errors"]'), github.event.inputs.action)
@@ -236,7 +211,7 @@ jobs:
       - name: Trust the deploy host
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.KAMAL_SERVER_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.KAMAL_SERVER_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
           echo -e "Host *\n  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null" >> ~/.ssh/config
 
       - name: "Fetch ${{ github.event.inputs.action }}"

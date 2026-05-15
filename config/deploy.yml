@@ -2,7 +2,7 @@
 
 service: <%= ENV.fetch('KAMAL_SERVICE', 'pulse-board') %>
 
-image: <%= ENV.fetch('KAMAL_IMAGE', "#{ENV.fetch('GITHUB_REPOSITORY_OWNER', 'developedbysaad')}/#{ENV.fetch('KAMAL_SERVICE', 'pulse-board')}") %>
+image: <%= ENV.fetch('KAMAL_IMAGE', "#{ENV.fetch('KAMAL_REGISTRY_USERNAME', 'developedbysaad')}/#{ENV.fetch('KAMAL_SERVICE', 'pulse-board')}") %>
 
 servers:
   web:
@@ -20,7 +20,7 @@ proxy:
     timeout: 3
 
 registry:
-  server: <%= ENV.fetch('KAMAL_REGISTRY_SERVER', 'ghcr.io') %>
+  server: <%= ENV.fetch('KAMAL_REGISTRY_SERVER', 'index.docker.io') %>
   username:
     - KAMAL_REGISTRY_USERNAME
   password:
@@ -30,7 +30,7 @@ builder:
   arch: amd64
   cache:
     type: registry
-    image: <%= ENV.fetch('KAMAL_BUILD_CACHE_IMAGE', "#{ENV.fetch('GITHUB_REPOSITORY_OWNER', 'developedbysaad')}/#{ENV.fetch('KAMAL_SERVICE', 'pulse-board')}-buildcache") %>
+    image: <%= ENV.fetch('KAMAL_BUILD_CACHE_IMAGE', "#{ENV.fetch('KAMAL_REGISTRY_USERNAME', 'developedbysaad')}/#{ENV.fetch('KAMAL_SERVICE', 'pulse-board')}-buildcache") %>
 
 env:
   clear:
