@@ -32,20 +32,22 @@ A real-time online polling platform. Admins create polls (questions, options, vo
 ```
 pulse-board/
 ├── backend/                          # Express 5 JSON API + socket.io
+│   ├── .env.example                  # backend runtime env (DB creds, app secrets) — copy to .env
 │   └── src/{app,index,config,auth,middleware,validators,routes,controllers,models,sockets,db}
 ├── frontend/                         # React 19 + Vite 8 + Tailwind 4
 │   └── src/{main,App,router,api,lib,hooks,context,pages,components,styles}
 ├── docs/                             # Astro 6 + Starlight — served at /docs in prod
 │   └── src/content/docs/
 ├── config/
-│   └── deploy.yml                    # Kamal deploy config
+│   └── deploy.yml                    # Kamal deploy config — every value is ERB-read from env
 ├── .kamal/
-│   ├── secrets                       # gitignored; templated from env
+│   ├── secrets                       # gitignored; composes DATABASE_URL + forwards env vars
 │   └── hooks/pre-deploy              # runs sequelize migrations
-├── .github/workflows/deploy.yml      # workflow_dispatch → Kamal
+├── .github/workflows/deploy.yml      # manual-dispatch only → wraps Kamal commands
+├── .env.example                      # ROOT — Kamal deploy env vars (used by local `kamal deploy`)
 ├── Dockerfile                        # multi-stage: deps → build → runtime
 ├── public/images/                    # in-app screenshots — consumed by /docs and the pitch deck
-├── plan/todo.md
+├── plan/{setup.md,todo.md}           # go-live runbook + project plan
 ├── CLAUDE.md
 └── package.json                      # npm workspaces root
 ```
@@ -72,14 +74,21 @@ node -e "for (const k of ['SESSION_SECRET','CSRF_SECRET','COOKIE_SECRET']) conso
 # Paste into backend/.env, then fill in DEV_DB_* / TEST_DB_* values
 ```
 
-Create the dev DB and run migrations:
+Create the dev DB and run migrations from the repo root:
 
 ```bash
-cd backend
-npx sequelize-cli db:create
-npx sequelize-cli db:migrate
-cd ..
+npm run db:create     # creates pulse_board_dev (per backend/.env)
+npm run migrate       # runs every migration in order
+npm run db:seed       # optional — loads a demo admin + five demo polls
 ```
+
+If you already have a partially-migrated dev DB and want a fresh start:
+
+```bash
+npm run db:reset && npm run db:seed
+```
+
+`db:reset` chains `db:drop || true && db:create && db:migrate`. Every sequelize command is wrapped as an npm script (see `package.json`) so you never need to `cd backend && npx sequelize-cli ...` — the `.sequelizerc` lives in the backend workspace and the npm scripts delegate into it.
 
 Run all three servers (backend, React SPA, Starlight docs) in parallel from the repo root:
 
@@ -129,15 +138,20 @@ NODE_ENV=production node backend/src/index.js
 
 ## Deploy (Kamal 2 + GitHub Actions)
 
+Pulse Board ships as one Docker image. Kamal 2 builds it, pushes to GHCR, boots a bundled Postgres accessory the first time, runs migrations, and atomic-swaps the new container behind a shared `kamal-proxy` with Let's Encrypt TLS — all of it driven by `kamal` CLI commands wrapped by a manual-dispatch GitHub workflow.
+
 ```
 Dockerfile               # multi-stage: install → build FE+docs → slim runtime
-config/deploy.yml        # Kamal config (ERB-templated from env vars)
-.kamal/secrets           # gitignored; references SESSION_SECRET / POSTGRES_PASSWORD / etc.
+config/deploy.yml        # Kamal config — every value is ERB-read from env (no hardcoded names)
+.kamal/secrets           # gitignored; forwards env vars + composes DATABASE_URL from POSTGRES_*
 .kamal/hooks/pre-deploy  # runs `npx sequelize-cli db:migrate` on each deploy
-.github/workflows/deploy.yml   # manual dispatch only — see workflow inputs below
+.env.example             # root — Kamal env vars when deploying from your laptop (see "Local Kamal" below)
+.github/workflows/deploy.yml   # manual-dispatch only — every action wraps a kamal command
 ```
 
-The deploy workflow is **manual-dispatch only** (`on: workflow_dispatch`). There is no auto-deploy on push. Two inputs at run time:
+Nothing in `config/deploy.yml` or `.kamal/secrets` is hardcoded — every name (service, registry, image path, postgres user/db, port, rate-limit window) is read via `ENV.fetch(..., '<default>')` so forking pulse-board into another app is a pure env-vars exercise. The defaults match the values pulse-board itself uses, so a vanilla deploy just works.
+
+The deploy workflow is **manual-dispatch only** (`on: workflow_dispatch`). There is no `on: push` / `on: pull_request` / `on: schedule`. Two inputs at run time:
 
 - **`action`** — one of the Kamal-native actions in the table below.
 - **`ref`** — branch, tag, or commit SHA to deploy. Defaults to `main`.
@@ -195,22 +209,68 @@ Without these the app still boots — they unlock outbound email and the demo-se
 | `GUEST_DEMO_EMAIL`    | Email to use for the demo admin login created by `npm run db:seed`.                                       | Demo admin seed                                                                                      |
 | `GUEST_DEMO_PASSWORD` | Password to use for that demo admin login.                                                                | Demo admin seed                                                                                      |
 
-### Auto-injected by the workflow (you usually don't add these)
+### Optional GitHub Environment **variables** (non-sensitive overrides)
 
-The deploy workflow fills these for you — for **GHCR** (the default registry) you don't need to set anything. They only become Environment secrets if you want to override the defaults (e.g. push to Docker Hub, or push to GHCR under a different account than `github.actor`).
+These are *variables* not *secrets* — values you might tweak per-fork but don't need to hide. Add them under **Settings → Environments → `production` → Add variable**. Every row has a workflow-side default, so leave them unset to use Pulse Board's defaults. The workflow reads each as `${{ vars.<NAME> || '<default>' }}`.
 
-| Variable                    | Default source                                                                                       | When to override                                                                                  |
-| --------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `KAMAL_REGISTRY_USERNAME`   | `${{ github.actor }}` — the user who clicked **Run workflow**                                        | Push to Docker Hub or to GHCR under a different account; set the secret to your registry username |
-| `KAMAL_REGISTRY_PASSWORD`   | `${{ secrets.GITHUB_TOKEN }}` (with `packages: write` already granted on the workflow)               | Push to a registry that needs an explicit PAT; set the secret to a token with `write:packages`    |
-| `PUBLIC_ORIGIN`             | Composed as `https://${KAMAL_DEPLOY_HOST}` — used for absolute URLs in outbound email                | Almost never                                                                                       |
-| `DATABASE_URL`              | Composed in `.kamal/secrets` from `POSTGRES_PASSWORD`, pinned to the `pulse-board-db` accessory hostname | When you swap the bundled accessory for managed Postgres (Neon / Supabase / RDS / …)              |
+| Variable                  | Default               | When to set                                                                              |
+| ------------------------- | --------------------- | ---------------------------------------------------------------------------------------- |
+| `KAMAL_SERVICE`           | `pulse-board`         | Forking the repo into another app on the same host — namespaces every container/volume. |
+| `KAMAL_REGISTRY_SERVER`   | `ghcr.io`             | Pushing to Docker Hub (`index.docker.io`) or a private registry.                          |
+| `APP_PORT`                | `3000`                | Running multiple services on the same host that all want :3000 internally.                |
+| `RATE_LIMIT_WINDOW_MS`    | `900000` (15 min)     | Tightening / loosening the public submit-response rate limit.                             |
+| `RATE_LIMIT_MAX`          | `100`                 | Same — max requests per window per IP.                                                    |
+| `POSTGRES_USER`           | `pulse`               | Forking — match the new app's name for clarity in `psql`.                                |
+| `POSTGRES_DB`             | `pulse_board_production` | Forking — same.                                                                       |
 
-The workflow uses the GitHub Actions `||` fallback operator, so the lookup is `secrets.KAMAL_REGISTRY_USERNAME || github.actor` and `secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN`. If a secret is set, it wins; if not, the default kicks in. This is how the same workflow file works for both GHCR (zero setup) and any other registry (set both secrets).
+### Registry credentials — defaults, overrides, and the GHCR gotcha
 
-> **If your GHCR deploy fails with `unauthorized: authentication required`**, the most common cause is that `github.actor`'s `GITHUB_TOKEN` doesn't have permission to publish to the package — usually because the package already exists with restricted access or it lives under an org you're not a member of. Fix: add a `KAMAL_REGISTRY_USERNAME` secret with your real GitHub handle, and a `KAMAL_REGISTRY_PASSWORD` secret with a PAT scoped to `write:packages, read:packages`. The workflow will pick those up automatically.
+The workflow needs to log in to a container registry to push the built image. It does this via three keys, all overridable:
 
-> **Note** — `KAMAL_SERVER_HOST` and `KAMAL_DEPLOY_HOST` are stored as **secrets** in the current workflow (the hostname/IP is not strictly sensitive, but storing them as secrets keeps them out of public run logs). If you'd rather expose them as GitHub **variables** so they show up plainly in logs, move them under **Environments → production → Add variable** and update the `secrets.*` references in both `.github/workflows/deploy.yml` and `config/deploy.yml` to `vars.*`.
+```yaml
+KAMAL_REGISTRY_SERVER:   ${{ vars.KAMAL_REGISTRY_SERVER   || 'ghcr.io' }}
+KAMAL_REGISTRY_USERNAME: ${{ secrets.KAMAL_REGISTRY_USERNAME || github.actor }}
+KAMAL_REGISTRY_PASSWORD: ${{ secrets.KAMAL_REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+```
+
+The `||` operator means: if you've set a secret/variable, it wins; if not, the default kicks in. This is how the same workflow handles both registries:
+
+- **GHCR (default)** — leave all three unset. The workflow uses `github.actor` as username and the auto-issued `${{ secrets.GITHUB_TOKEN }}` as password. The `permissions: packages: write` at the top of the workflow grants the token publish access. Zero secrets needed in 90% of cases.
+- **Docker Hub or any other registry** — add `KAMAL_REGISTRY_USERNAME` and `KAMAL_REGISTRY_PASSWORD` as Environment **secrets** (the password is a PAT). Optionally set `KAMAL_REGISTRY_SERVER` as a variable (`index.docker.io` for Docker Hub).
+
+> **GHCR `unauthorized: authentication required` after running `setup`?**
+> The auto-injected `GITHUB_TOKEN` doesn't have permission to publish to the package. Usually one of:
+> - The package was previously created with restricted access — fix by visiting `https://github.com/users/<owner>/packages/container/<service>/settings` and granting your repo write access, **or**
+> - The package lives under an org the actor isn't a member of — fix by adding `KAMAL_REGISTRY_USERNAME` (your GitHub handle) and `KAMAL_REGISTRY_PASSWORD` (a PAT with `write:packages, read:packages`) as Environment secrets. The workflow picks them up automatically via the `||` fallback.
+
+### Other auto-injected values (do not add as secrets)
+
+| Variable                | Source                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_REPOSITORY_OWNER` | `${{ github.repository_owner }}` — feeds the image path `<owner>/<service>`                                       |
+| `PUBLIC_ORIGIN`         | Composed as `https://${KAMAL_DEPLOY_HOST}` — used for absolute URLs in outbound email / password-reset links       |
+| `DATABASE_URL`          | Composed in `.kamal/secrets` as `postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${KAMAL_SERVICE}-db:5432/${POSTGRES_DB}` |
+
+> **Note** — `KAMAL_SERVER_HOST` and `KAMAL_DEPLOY_HOST` are stored as **secrets** in the default workflow (the hostname/IP isn't truly sensitive but storing them as secrets keeps them out of public run logs and out of the step summary). If you'd rather see the URL on the deployment card and in the summary, move them to **Environments → production → Add variable** and replace `secrets.KAMAL_*` with `vars.KAMAL_*` in `.github/workflows/deploy.yml` + `config/deploy.yml`. A comment in the workflow records the single-line change.
+
+### Local Kamal (laptop deploys + first-time `kamal setup`)
+
+The GitHub workflow handles every routine deploy. But you need a local Kamal install for the **one-time** `kamal setup` (the workflow can do it too, but running it from your laptop gives clearer output and lets you debug DNS / SSH issues).
+
+`config/deploy.yml` starts with:
+
+```yaml
+<% begin; require "dotenv"; Dotenv.load(".env"); rescue LoadError; end %>
+```
+
+…so if a `.env` exists at the repo root, every value below is read from it. **Copy `.env.example` to `.env`** (the file is gitignored) and fill in the same values you'd put in GitHub Environment secrets/variables. Top of `.env.example` documents the policy — GitHub secrets are preferred; the `.env` is the local fallback. Then from the repo root:
+
+```bash
+gem install kamal -v 2.11.0
+kamal setup     # boots accessories + deploys, all 3 steps in one
+```
+
+After that, deploy from the laptop with `kamal deploy`, or hand off to the GitHub Action.
 
 ### What the workflow actually does
 
