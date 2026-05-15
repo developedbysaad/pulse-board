@@ -1,19 +1,5 @@
 name: Deploy
 
-# ─────────────────────────────────────────────────────────────────────
-# Manual-dispatch only.
-#   • The only trigger is `workflow_dispatch:` below — a job *only*
-#     runs when someone clicks Actions → Deploy → Run workflow.
-#   • There is no `on: push`, `on: pull_request`, `on: schedule`.
-#   • Pushes the image to Docker Hub (default — override via
-#     `KAMAL_REGISTRY_SERVER` variable). Auth is via
-#     `KAMAL_REGISTRY_USERNAME` + `KAMAL_REGISTRY_PASSWORD` Environment
-#     secrets, which are REQUIRED for every deploy/setup.
-#
-# Every action below is a thin wrapper around a Kamal CLI command,
-# so anyone reading the dropdown can map the option to docs at
-# https://kamal-deploy.org/docs/commands/.
-# ─────────────────────────────────────────────────────────────────────
 on:
   workflow_dispatch:
     inputs:
@@ -110,7 +96,7 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref }}
 
-      - name: Set up Ruby (Kamal is a Ruby gem)
+      - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
@@ -126,7 +112,6 @@ jobs:
         if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.KAMAL_REGISTRY_SERVER }}
           username: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
           password: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 
@@ -136,7 +121,7 @@ jobs:
           DH_USER: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
           DH_PASS: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
         run: |
-          echo "::group::Credential fingerprint (compare locally to confirm the GitHub secret matches your PAT)"
+          echo "::group::Credential fingerprint"
           USER_LEN="${#DH_USER}"
           PASS_LEN="${#DH_PASS}"
           USER_HASH="$(printf '%s' "$DH_USER" | sha256sum | head -c 16)"
@@ -145,30 +130,23 @@ jobs:
           echo "KAMAL_REGISTRY_PASSWORD : length=$PASS_LEN  sha256-prefix=$PASS_HASH"
           case "$DH_PASS" in
             dckr_pat_*) echo "PAT format ok — starts with 'dckr_pat_'." ;;
-            *) echo "::warning::PAT does NOT start with 'dckr_pat_'. Every Docker Hub PAT begins with that prefix — what's currently in the GitHub secret is not a PAT (might be an account password, a partial paste, or empty)." ;;
+            *) echo "::warning::PAT does NOT start with 'dckr_pat_'." ;;
           esac
           if [ "$PASS_LEN" -lt 30 ] || [ "$PASS_LEN" -gt 80 ]; then
-            echo "::warning::PAT length is $PASS_LEN. Real Docker Hub PATs are typically 36-40 characters. This length is suspicious."
+            echo "::warning::PAT length is $PASS_LEN. Real Docker Hub PATs are typically 36-40 characters."
           fi
           echo "::endgroup::"
 
-          echo "::group::Probe push to ${DH_USER}/${KAMAL_SERVICE}-pat-probe (same auth path as Kamal)"
+          echo "::group::Probe push"
           docker pull --quiet alpine:latest
           PROBE="${DH_USER}/${KAMAL_SERVICE}-pat-probe:ci"
           docker tag alpine:latest "$PROBE"
           if docker push "$PROBE" ; then
             echo "::endgroup::"
-            echo "::notice::PAT push succeeded — credentials are good, problem is downstream."
+            echo "::notice::PAT push succeeded — credentials are good."
           else
             echo "::endgroup::"
             echo "::error::PAT push FAILED. The KAMAL_REGISTRY_PASSWORD secret currently in this Environment cannot push to ${DH_USER}/${KAMAL_SERVICE}-pat-probe."
-            echo ""
-            echo "What to do next:"
-            echo "1) Locally, hash your real PAT and username and compare to the prefixes above:"
-            echo "   echo -n 'YOUR-DOCKERHUB-HANDLE' | sha256sum | head -c 16"
-            echo "   echo -n 'dckr_pat_xxxxxxxxxxxxxxxx' | sha256sum | head -c 16"
-            echo "   If either prefix DOESN'T match, the GitHub secret is not what you think it is — update it."
-            echo "2) If both prefixes match, the PAT's scope is wrong despite the UI label. Delete and regenerate with 'Read & Write' explicitly clicked."
             exit 1
           fi
 
@@ -204,7 +182,7 @@ jobs:
               ;;
           esac
 
-      - name: Prune old containers and images (after successful deploy)
+      - name: Prune old containers and images
         if: success() && github.event.inputs.action == 'deploy'
         run: kamal prune all || true
         continue-on-error: true

@@ -5,10 +5,6 @@
   rescue LoadError
   end
 
-  # Treat empty-string env vars as missing. The GitHub Actions workflow
-  # exports a `${{ vars.X }}` expression as "" when the variable is unset,
-  # which would otherwise defeat ENV.fetch's default. Use env_or everywhere
-  # a default matters.
   def env_or(key, fallback = nil)
     v = ENV[key]
     v && !v.empty? ? v : fallback
@@ -36,8 +32,7 @@ proxy:
 
 registry:
   server: <%= env_or('KAMAL_REGISTRY_SERVER', 'index.docker.io') %>
-  username:
-    - KAMAL_REGISTRY_USERNAME
+  username: <%= env_or('KAMAL_REGISTRY_USERNAME') %>
   password:
     - KAMAL_REGISTRY_PASSWORD
 
