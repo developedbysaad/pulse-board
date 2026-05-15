@@ -31,8 +31,8 @@ The longer answer:
 
 ### Things you'll get for free
 
-- The repo's `.gitignore` already blocks `.env`, `.kamal/secrets`, and the `node_modules` paths. Secrets never enter your working tree.
-- `.kamal/secrets` is templated — the file checked in is `BREVO_API_KEY=$BREVO_API_KEY`, never the literal value. Kamal substitutes from process env at deploy time.
+- The repo's `.gitignore` already blocks `.env` and the `node_modules` paths. Literal secret values never enter your working tree.
+- `.kamal/secrets` is committed but it's a **template** — every line is `KEY=$KEY` style, never a literal value. Kamal substitutes from process env at deploy time. The file's job is just to declare which env vars to forward into the deployed container.
 - `backend/src/config/env.js` validates required secrets via Zod at boot. The container exits 1 (with a clean error) if `SESSION_SECRET` etc. are missing, instead of running half-broken.
 
 ## Secret flow, end to end

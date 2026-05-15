@@ -145,7 +145,7 @@ Pulse Board ships as one Docker image. Kamal 2 builds it, pushes to **Docker Hub
 ```
 Dockerfile               # multi-stage: install → build FE+docs → slim runtime
 config/deploy.yml        # Kamal config — every value is ERB-read from env (no hardcoded names)
-.kamal/secrets           # gitignored; forwards env vars + composes DATABASE_URL from POSTGRES_*
+.kamal/secrets           # committed template ($VAR refs only, no literal secrets); forwards env vars + composes DATABASE_URL
 .kamal/hooks/pre-deploy  # runs `npx sequelize-cli db:migrate` on each deploy
 .env.example             # root — Kamal env vars when deploying from your laptop (see "Local Kamal" below)
 .github/workflows/deploy.yml   # manual-dispatch only — every action wraps a kamal command

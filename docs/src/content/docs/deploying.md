@@ -104,7 +104,7 @@ Kamal then:
 | `Dockerfile`                        | Multi-stage build                                 |
 | `.dockerignore`                     | Keeps node_modules, .git, .env out of the image   |
 | `config/deploy.yml`                 | Kamal config — service, proxy, env, Postgres accessory |
-| `.kamal/secrets`                    | Shell-style template — gitignored, env-substituted |
+| `.kamal/secrets`                    | Shell-style template — committed (only `$VAR` refs, no literal secrets), env-substituted at deploy time |
 | `.kamal/hooks/pre-deploy`           | Runs `sequelize-cli db:migrate` against the new image |
 | `.github/workflows/deploy.yml`      | Manual-dispatch deploy workflow                   |
 
