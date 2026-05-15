@@ -130,20 +130,45 @@ jobs:
           username: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
           password: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 
-      - name: Probe registry push permission
+      - name: Probe registry credentials
         if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
+        env:
+          DH_USER: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
+          DH_PASS: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
         run: |
-          echo "::group::Pushing a 7 KB probe image to verify the PAT can write to ${{ secrets.KAMAL_REGISTRY_USERNAME }}/<service>"
+          echo "::group::Credential fingerprint (compare locally to confirm the GitHub secret matches your PAT)"
+          USER_LEN="${#DH_USER}"
+          PASS_LEN="${#DH_PASS}"
+          USER_HASH="$(printf '%s' "$DH_USER" | sha256sum | head -c 16)"
+          PASS_HASH="$(printf '%s' "$DH_PASS" | sha256sum | head -c 16)"
+          echo "KAMAL_REGISTRY_USERNAME : length=$USER_LEN  sha256-prefix=$USER_HASH"
+          echo "KAMAL_REGISTRY_PASSWORD : length=$PASS_LEN  sha256-prefix=$PASS_HASH"
+          case "$DH_PASS" in
+            dckr_pat_*) echo "PAT format ok — starts with 'dckr_pat_'." ;;
+            *) echo "::warning::PAT does NOT start with 'dckr_pat_'. Every Docker Hub PAT begins with that prefix — what's currently in the GitHub secret is not a PAT (might be an account password, a partial paste, or empty)." ;;
+          esac
+          if [ "$PASS_LEN" -lt 30 ] || [ "$PASS_LEN" -gt 80 ]; then
+            echo "::warning::PAT length is $PASS_LEN. Real Docker Hub PATs are typically 36-40 characters. This length is suspicious."
+          fi
+          echo "::endgroup::"
+
+          echo "::group::Probe push to ${DH_USER}/${KAMAL_SERVICE}-pat-probe (same auth path as Kamal)"
           docker pull --quiet alpine:latest
-          PROBE="${{ secrets.KAMAL_REGISTRY_USERNAME }}/${KAMAL_SERVICE}-pat-probe:ci"
+          PROBE="${DH_USER}/${KAMAL_SERVICE}-pat-probe:ci"
           docker tag alpine:latest "$PROBE"
           if docker push "$PROBE" ; then
             echo "::endgroup::"
             echo "::notice::PAT push succeeded — credentials are good, problem is downstream."
           else
             echo "::endgroup::"
-            echo "::error::PAT push FAILED. The KAMAL_REGISTRY_PASSWORD secret currently in this Environment cannot push to ${{ secrets.KAMAL_REGISTRY_USERNAME }}/${KAMAL_SERVICE}-pat-probe."
-            echo "Either the secret wasn't saved with the new PAT value, the PAT's scope is wrong, or the username and PAT belong to different Docker Hub accounts."
+            echo "::error::PAT push FAILED. The KAMAL_REGISTRY_PASSWORD secret currently in this Environment cannot push to ${DH_USER}/${KAMAL_SERVICE}-pat-probe."
+            echo ""
+            echo "What to do next:"
+            echo "1) Locally, hash your real PAT and username and compare to the prefixes above:"
+            echo "   echo -n 'YOUR-DOCKERHUB-HANDLE' | sha256sum | head -c 16"
+            echo "   echo -n 'dckr_pat_xxxxxxxxxxxxxxxx' | sha256sum | head -c 16"
+            echo "   If either prefix DOESN'T match, the GitHub secret is not what you think it is — update it."
+            echo "2) If both prefixes match, the PAT's scope is wrong despite the UI label. Delete and regenerate with 'Read & Write' explicitly clicked."
             exit 1
           fi
 
