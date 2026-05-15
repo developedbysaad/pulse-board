@@ -139,8 +139,27 @@ config/deploy.yml        # Kamal config (ERB-templated from env vars)
 
 The deploy workflow is **manual-dispatch only** (`on: workflow_dispatch`). There is no auto-deploy on push. Two inputs at run time:
 
+- **`action`** — one of the Kamal-native actions in the table below.
 - **`ref`** — branch, tag, or commit SHA to deploy. Defaults to `main`.
-- **`action`** — `deploy` (default), `redeploy`, `rollback`, or `proxy-reboot`.
+
+#### Workflow actions
+
+Each action is a thin wrapper around the named Kamal command. The dropdown is grouped: lifecycle (deploy/redeploy/rollback/setup) → database (migrate/seed) → observability (logs/logs-errors) → maintenance (proxy-reboot/prune).
+
+| `action` value   | Wraps                                                  | What it does                                                                                              | When to use                                                              |
+| ---------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `deploy`         | `kamal deploy`                                         | Build the image → push to GHCR → run pre-deploy migrations → atomic blue-green swap on the host           | The default. Every normal release.                                       |
+| `redeploy`       | `kamal redeploy`                                       | Restart the existing container with the **same** image (no rebuild, no push). Drops in-memory state.      | Picked up new env-var values; need a fresh process without a code change. |
+| `rollback`       | `kamal rollback`                                       | Flip the live container back to the previous image version Kamal still has on disk                        | Latest release is broken and you want it gone now.                       |
+| `setup`          | `kamal setup`                                          | FIRST-TIME provision — install Docker, boot the Postgres accessory, run migrations, deploy                | Only on a brand-new host. Usually run from your laptop once.             |
+| `migrate`        | `kamal app exec --reuse "npx sequelize-cli db:migrate"` | Re-run migrations against the current container                                                          | Migrations failed mid-deploy or were added without redeploying.          |
+| `seed`           | `kamal app exec --reuse "npx sequelize-cli db:seed:all"` | Load demo data (uses `GUEST_DEMO_EMAIL` / `GUEST_DEMO_PASSWORD`)                                         | Showcasing the app on a fresh deploy.                                    |
+| `logs`           | (SSH + `docker logs --tail 500`)                       | Print the last 500 timestamped log lines from `pulse-board-web`                                           | Quick peek without opening a terminal.                                   |
+| `logs-errors`    | (SSH + `docker logs --since 24h` filtered)             | Grep error / exception / 5xx / `failed` / `stack` lines from the last 24 hours                            | Triage after an incident.                                                |
+| `proxy-reboot`   | `kamal proxy reboot --confirmed`                       | Restart the host's `kamal-proxy` singleton                                                                | Rare — only if proxy config changed or TLS renewal hung.                 |
+| `prune`          | `kamal prune all`                                      | Remove old containers + dangling images on the host                                                       | Disk-pressure cleanup. `deploy` already prunes on success.               |
+
+The `logs` and `logs-errors` actions run in a separate, lightweight job that only sets up SSH (no Ruby, no Docker, no Kamal install). Everything else runs in the main `kamal` job.
 
 For the full step-by-step "from a blank GitHub repo to a live URL" runbook, see [`plan/setup.md`](plan/setup.md) — including the [TL;DR go-live checklist](plan/setup.md#tldr--go-live-checklist) at the top. The tables below are the secret reference the runbook points at.
 
@@ -191,20 +210,27 @@ The deploy workflow fills these for you — adding them yourself would just be i
 
 ### What the workflow actually does
 
-Every `Run workflow` click goes through these steps:
+For `deploy` / `redeploy` / `rollback` / `setup` / `migrate` / `seed` / `proxy-reboot` / `prune`, the `kamal` job runs:
 
-1. **Validate required secrets** — fails fast with a named-missing list if any of the seven required Environment secrets aren't set.
+1. **Validate required Environment secrets** — fails fast with a named-missing list if any of the seven required secrets aren't set.
 2. Checkout the chosen `ref`.
-3. Install Ruby 3.3 + Kamal 2.11.0 + Docker Buildx.
-4. Log into GHCR with the auto-injected `GITHUB_TOKEN`.
+3. Install Ruby 3.3 + Kamal 2.11.0.
+4. Set up Docker Buildx + log into GHCR (only for `deploy` / `setup` — the others don't build).
 5. Load `SSH_PRIVATE_KEY` into ssh-agent and `ssh-keyscan` the deploy host.
-6. Release any stale Kamal lock, then run `kamal <action>`.
-7. After a successful `deploy`, prune old containers + images on the host so disk doesn't grow forever.
+6. Release any stale `kamal lock`, then run the wrapped Kamal command.
+7. After a successful `deploy`, run `kamal prune all` so old containers + images don't pile up on the host.
 8. Write a step summary with `action / ref / commit / status / URL / docs URL`.
+
+For `logs` / `logs-errors`, the lightweight `logs` job runs:
+
+1. **Validate required Environment secrets** — only needs `SSH_PRIVATE_KEY` + `KAMAL_SERVER_HOST`.
+2. Load `SSH_PRIVATE_KEY` into ssh-agent and `ssh-keyscan` the deploy host.
+3. SSH in, find the running `pulse-board-web` container, and emit either the last 500 lines or filtered error lines from the last 24h.
+4. Write a step summary.
 
 ### To deploy
 
-GitHub → **Actions** → **Deploy** → **Run workflow** → pick `ref` and `action` → Run. First time only, run `kamal setup` once from your laptop to boot the Postgres accessory and provision TLS — see [`plan/setup.md` §2.8](plan/setup.md#28-first-deploy-one-time-kamal-setup-from-your-laptop). After that, the Action handles everything.
+GitHub → **Actions** → **Deploy** → **Run workflow** → pick `action` + `ref` → Run. First time only, run `kamal setup` once from your laptop (cleaner than CI for the bring-up — see [`plan/setup.md` §2.8](plan/setup.md#28-first-deploy-one-time-kamal-setup-from-your-laptop)); after that, the Action handles everything.
 
 ## API surface (admin)
 
