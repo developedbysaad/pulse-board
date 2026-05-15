@@ -95,7 +95,7 @@ Kamal then:
 1. Builds the multi-stage Docker image (frontend + docs + backend prod deps).
 2. Pushes to `docker.io/<KAMAL_REGISTRY_USERNAME>/pulse-board`.
 3. SSHes to the deploy server.
-4. Pulls the image, runs the pre-deploy migration hook, starts the new container, and the shared proxy swaps traffic to it.
+4. Pulls the image and starts the new container — its entrypoint runs `sequelize-cli db:migrate` before booting the app — and the shared proxy swaps traffic to it.
 
 ## Files involved
 
@@ -105,18 +105,18 @@ Kamal then:
 | `.dockerignore`                     | Keeps node_modules, .git, .env out of the image   |
 | `config/deploy.yml`                 | Kamal config — service, proxy, env, Postgres accessory |
 | `.kamal/secrets`                    | Shell-style template — committed (only `$VAR` refs, no literal secrets), env-substituted at deploy time |
-| `.kamal/hooks/pre-deploy`           | Runs `sequelize-cli db:migrate` against the new image |
+| `.kamal/hooks/`                     | Optional Kamal lifecycle hooks (empty by default)   |
 | `.github/workflows/deploy.yml`      | Manual-dispatch deploy workflow                   |
 
 ## Migrations
 
-Wired into `.kamal/hooks/pre-deploy`:
+Wired into the container's entrypoint (`Dockerfile`'s `CMD`):
 
-```bash
-kamal app exec --reuse "npx sequelize-cli db:migrate"
+```dockerfile
+CMD ["sh", "-c", "npx sequelize-cli db:migrate && exec node backend/src/index.js"]
 ```
 
-This runs against the **new** image (not the live container), using the same env vars and secrets the running container will use — including `DATABASE_URL`, which points at the `pulse-board-db` accessory on the kamal Docker network. Kamal only swaps traffic onto the new container if the migration step succeeds.
+Every time the container starts, it runs `sequelize-cli db:migrate` first and then boots the app. Migrations are idempotent (Sequelize tracks applied ones in `SequelizeMeta`), so on subsequent starts the migrate step is a fast no-op. If a migration fails, the container exits non-zero, kamal-proxy's health check never goes green, and Kamal refuses to swap traffic — so a broken migration cannot take the live site down. `DATABASE_URL` is resolved at container start time and points at the `pulse-board-db` accessory on the kamal Docker network.
 
 ## Coexisting with other Kamal apps
 

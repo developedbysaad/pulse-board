@@ -42,7 +42,7 @@ pulse-board/
 │   └── deploy.yml                    # Kamal deploy config — every value is ERB-read from env
 ├── .kamal/
 │   ├── secrets                       # gitignored; composes DATABASE_URL + forwards env vars
-│   └── hooks/pre-deploy              # runs sequelize migrations
+│   └── hooks/                        # Kamal lifecycle hooks (empty by default)
 ├── .github/workflows/deploy.yml      # manual-dispatch only → wraps Kamal commands
 ├── .env.example                      # ROOT — Kamal deploy env vars (used by local `kamal deploy`)
 ├── Dockerfile                        # multi-stage: deps → build → runtime
@@ -146,7 +146,7 @@ Pulse Board ships as one Docker image. Kamal 2 builds it, pushes to **Docker Hub
 Dockerfile               # multi-stage: install → build FE+docs → slim runtime
 config/deploy.yml        # Kamal config — every value is ERB-read from env (no hardcoded names)
 .kamal/secrets           # committed template ($VAR refs only, no literal secrets); forwards env vars + composes DATABASE_URL
-.kamal/hooks/pre-deploy  # runs `npx sequelize-cli db:migrate` on each deploy
+.kamal/hooks/            # Kamal lifecycle hooks (empty by default)
 .env.example             # root — Kamal env vars when deploying from your laptop (see "Local Kamal" below)
 .github/workflows/deploy.yml   # manual-dispatch only — every action wraps a kamal command
 ```
@@ -164,7 +164,7 @@ Each action is a thin wrapper around the named Kamal command. The dropdown is gr
 
 | `action` value   | Wraps                                                  | What it does                                                                                              | When to use                                                              |
 | ---------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `deploy`         | `kamal deploy`                                         | Build the image → push to Docker Hub → run pre-deploy migrations → atomic blue-green swap on the host     | The default. Every normal release.                                       |
+| `deploy`         | `kamal deploy`                                         | Build the image → push to Docker Hub → atomic blue-green swap. Migrations run automatically in the container's entrypoint on start. | The default. Every normal release.                                       |
 | `redeploy`       | `kamal redeploy`                                       | Restart the existing container with the **same** image (no rebuild, no push). Drops in-memory state.      | Picked up new env-var values; need a fresh process without a code change. |
 | `rollback`       | `kamal rollback`                                       | Flip the live container back to the previous image version Kamal still has on disk                        | Latest release is broken and you want it gone now.                       |
 | `setup`          | `kamal setup`                                          | FIRST-TIME provision — install Docker, boot the Postgres accessory, run migrations, deploy                | Only on a brand-new host. Usually run from your laptop once.             |
