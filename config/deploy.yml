@@ -19,7 +19,6 @@ servers:
   web:
     hosts:
       - <%= ENV['KAMAL_SERVER_HOST'] %>
-    cmd: node backend/src/index.js
 
 proxy:
   ssl: true
