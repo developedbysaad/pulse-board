@@ -130,6 +130,23 @@ jobs:
           username: ${{ secrets.KAMAL_REGISTRY_USERNAME }}
           password: ${{ secrets.KAMAL_REGISTRY_PASSWORD }}
 
+      - name: Probe registry push permission
+        if: contains(fromJSON('["deploy","setup"]'), github.event.inputs.action)
+        run: |
+          echo "::group::Pushing a 7 KB probe image to verify the PAT can write to ${{ secrets.KAMAL_REGISTRY_USERNAME }}/<service>"
+          docker pull --quiet alpine:latest
+          PROBE="${{ secrets.KAMAL_REGISTRY_USERNAME }}/${KAMAL_SERVICE}-pat-probe:ci"
+          docker tag alpine:latest "$PROBE"
+          if docker push "$PROBE" ; then
+            echo "::endgroup::"
+            echo "::notice::PAT push succeeded — credentials are good, problem is downstream."
+          else
+            echo "::endgroup::"
+            echo "::error::PAT push FAILED. The KAMAL_REGISTRY_PASSWORD secret currently in this Environment cannot push to ${{ secrets.KAMAL_REGISTRY_USERNAME }}/${KAMAL_SERVICE}-pat-probe."
+            echo "Either the secret wasn't saved with the new PAT value, the PAT's scope is wrong, or the username and PAT belong to different Docker Hub accounts."
+            exit 1
+          fi
+
       - name: Configure SSH agent
         uses: webfactory/ssh-agent@v0.9.1
         with:
