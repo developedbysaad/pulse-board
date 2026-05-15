@@ -1,0 +1,50 @@
+{
+  "name": "pulse-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Online polling platform — backend API + React frontend",
+  "author": {
+    "name": "Mohd Saad",
+    "url": "https://x.com/developedbysaad"
+  },
+  "homepage": "https://github.com/developedbysaad/pulse-board",
+  "license": "MIT",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "docs"
+  ],
+  "scripts": {
+    "dev": "concurrently -n be,fe,docs -c blue,magenta,cyan \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\" \"npm run dev --workspace docs\"",
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:docs": "npm run dev --workspace docs",
+    "start": "npm run start --workspace backend",
+    "build": "npm run build --workspace frontend && npm run build --workspace docs",
+    "test": "npm test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "migrate": "npm run migrate --workspace backend",
+    "migrate:undo": "npm run migrate:undo --workspace backend",
+    "db:create": "npm run db:create --workspace backend",
+    "db:create:test": "npm run db:create:test --workspace backend",
+    "db:reset": "npm run db:reset --workspace backend",
+    "db:seed": "npm run db:seed --workspace backend",
+    "db:seed:undo": "npm run db:seed:undo --workspace backend",
+    "setup": "npm install && npm run db:create && npm run db:create:test && npm run migrate && npm run db:seed",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx}": [
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.4",
+    "prettier": "^3.8.3"
+  }
+}

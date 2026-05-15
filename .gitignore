@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.local
+
+# Build artifacts
+**/dist/
+.astro/
+
+# Kamal — secrets templated from env vars at deploy time
+.kamal/secrets
+
+# OS / editor
+.DS_Store
+*.log

@@ -1,0 +1,81 @@
+# Pulse Board — Kamal 2 deploy config (Hetzner).
+#
+# Single-target deployment. Designed to coexist with other Kamal apps on
+# the same host:
+#   - kamal-proxy is a singleton on the host and routes by Host header,
+#     so different `proxy.host` values never interfere.
+#   - Kamal namespaces every container, volume, and accessory by the
+#     `service:` name below, so nothing clashes with another app's `db`.
+#   - DATABASE_URL points at this service's own postgres accessory
+#     (`pulse-board-db`), so we never touch another app's database.
+#
+# Run with: `kamal deploy` (no -d flag — there's only one destination).
+
+service: pulse-board
+
+image: <%= ENV.fetch('KAMAL_IMAGE', "#{ENV['GITHUB_REPOSITORY_OWNER'] || 'developedbysaad'}/pulse-board") %>
+
+servers:
+  web:
+    hosts:
+      - <%= ENV['KAMAL_SERVER_HOST'] %>
+    cmd: node backend/src/index.js
+
+proxy:
+  ssl: true
+  app_port: 3000
+  host: <%= ENV['KAMAL_DEPLOY_HOST'] %>
+  healthcheck:
+    path: /api/health
+    interval: 5
+    timeout: 3
+
+registry:
+  server: ghcr.io
+  username:
+    - KAMAL_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  cache:
+    type: registry
+    image: <%= "#{ENV['GITHUB_REPOSITORY_OWNER'] || 'developedbysaad'}/pulse-board-buildcache" %>
+
+env:
+  clear:
+    NODE_ENV: production
+    PORT: 3000
+    RATE_LIMIT_WINDOW_MS: 900000
+    RATE_LIMIT_MAX: 100
+  secret:
+    - SESSION_SECRET
+    - CSRF_SECRET
+    - COOKIE_SECRET
+    - DATABASE_URL
+    - PUBLIC_ORIGIN
+    - BREVO_API_KEY
+    - BREVO_SENDER_EMAIL
+    - BREVO_SENDER_NAME
+    - GUEST_DEMO_EMAIL
+    - GUEST_DEMO_PASSWORD
+
+# Dedicated Postgres for pulse-board only. The container name resolves
+# to `pulse-board-db` on the kamal Docker network (Kamal prefixes by
+# service name), and DATABASE_URL in .kamal/secrets points at exactly
+# that hostname — so we never reach into another app's database.
+accessories:
+  db:
+    image: postgres:17
+    host: <%= ENV['KAMAL_SERVER_HOST'] %>
+    env:
+      clear:
+        POSTGRES_USER: pulse
+        POSTGRES_DB: pulse_board_production
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      - data:/var/lib/postgresql/data
+
+asset_path: /app/frontend/dist

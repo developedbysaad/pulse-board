@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Run database migrations against the new image before traffic swings over.
+
+set -euo pipefail
+
+echo "[pre-deploy] Running migrations…"
+
+# `kamal app exec --reuse` runs a one-off command using the new image on the
+# target host, using the same env vars + secrets the running container will
+# use — so DATABASE_URL points at the Postgres accessory on the same network.
+kamal app exec --reuse "npx sequelize-cli db:migrate"
+
+echo "[pre-deploy] Migrations done."

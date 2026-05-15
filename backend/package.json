@@ -1,0 +1,56 @@
+{
+  "name": "pulse-board-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pulse Board API server",
+  "author": {
+    "name": "Mohd Saad",
+    "url": "https://x.com/developedbysaad"
+  },
+  "license": "MIT",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon -w src -e js src/index.js",
+    "build": "NODE_ENV=production npx sequelize-cli db:migrate",
+    "migrate": "npx sequelize-cli db:migrate",
+    "migrate:undo": "npx sequelize-cli db:migrate:undo",
+    "db:create": "npx sequelize-cli db:create",
+    "db:create:test": "NODE_ENV=test npx sequelize-cli db:create",
+    "db:reset": "npx sequelize-cli db:drop || true && npx sequelize-cli db:create && npx sequelize-cli db:migrate",
+    "db:seed": "npx sequelize-cli db:seed:all",
+    "db:seed:undo": "npx sequelize-cli db:seed:undo:all",
+    "pretest": "NODE_ENV=test npx sequelize-cli db:drop || true && NODE_ENV=test npx sequelize-cli db:create",
+    "test": "NODE_ENV=test jest --detectOpenHandles --runInBand",
+    "lint": "eslint src tests"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "csrf-csrf": "^4.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.1.0",
+    "http-errors": "^2.0.1",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0",
+    "pg": "^8.20.0",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.37.8",
+    "sequelize-cli": "^6.6.5",
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "jest": "^30.4.2",
+    "nodemon": "^3.1.14",
+    "supertest": "^7.2.2"
+  }
+}
