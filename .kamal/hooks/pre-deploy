@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[pre-deploy] Running migrations…"
+echo "[pre-deploy] Pushing env files to server…"
+kamal env push
 
+echo "[pre-deploy] Running migrations…"
 kamal app exec "npx sequelize-cli db:migrate"
 
 echo "[pre-deploy] Migrations done."
