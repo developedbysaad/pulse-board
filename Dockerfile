@@ -24,6 +24,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
+# Skip the `prepare: husky` lifecycle hook in production. husky is a
+# devDependency, so `npm ci --omit=dev` doesn't install it — without
+# this flag the prepare script would crash with `husky: not found`.
+ENV HUSKY=0
 
 # Production deps only (workspaces still needed so npm resolves the tree)
 COPY package.json package-lock.json ./
