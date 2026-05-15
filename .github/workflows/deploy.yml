@@ -172,8 +172,8 @@ jobs:
             redeploy)      kamal redeploy ;;
             rollback)      kamal rollback ;;
             setup)         kamal setup ;;
-            migrate)       kamal app exec --reuse "npx sequelize-cli db:migrate" ;;
-            seed)          kamal app exec --reuse "npx sequelize-cli db:seed:all" ;;
+            migrate)       kamal app exec "npx sequelize-cli db:migrate" ;;
+            seed)          kamal app exec "npx sequelize-cli db:seed:all" ;;
             proxy-reboot)  kamal proxy reboot --confirmed ;;
             prune)         kamal prune all ;;
             *)
